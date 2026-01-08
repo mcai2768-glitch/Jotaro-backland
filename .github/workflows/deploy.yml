@@ -1,0 +1,171 @@
+# =============================================================================
+# GitHub Actions - 自動化部署工作流程
+# GitHub Actions - Automated Deployment Workflow
+# =============================================================================
+# 這個檔案告訴 GitHub：
+# This file tells GitHub:
+# 「每當有人 push 程式碼到 main 分支，就自動執行以下動作」
+# "Whenever someone pushes code to the main branch, automatically run these actions"
+#
+# 你可以想像成：GitHub 送你一台免費的臨時電腦
+# Think of it as: GitHub gives you a free temporary computer
+# 幫你跑測試、build image、部署到伺服器
+# to run tests, build images, and deploy to servers
+# =============================================================================
+
+# 工作流程的名稱（會顯示在 GitHub Actions 頁面）
+# Workflow name (shown on GitHub Actions page)
+name: Deploy to Render
+
+# -----------------------------------------------------------------------------
+# 觸發條件：什麼時候執行這個工作流程？
+# Trigger: When should this workflow run?
+# -----------------------------------------------------------------------------
+on:
+  # 當 push 到 main 分支時觸發
+  # Trigger when pushing to main branch
+  push:
+    branches:
+      - main
+  
+  # 也可以手動觸發（在 GitHub Actions 頁面點按鈕）
+  # Can also be triggered manually (click button on GitHub Actions page)
+  workflow_dispatch:
+
+# -----------------------------------------------------------------------------
+# 定義工作（Jobs）
+# Define Jobs
+# -----------------------------------------------------------------------------
+# 一個 workflow 可以有多個 jobs
+# A workflow can have multiple jobs
+# 每個 job 都在獨立的虛擬機器上執行
+# Each job runs on its own virtual machine
+# -----------------------------------------------------------------------------
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: 測試程式碼 / Test Code
+  # ---------------------------------------------------------------------------
+  test:
+    name: 🧪 Run Tests
+
+    # 在什麼作業系統上執行？
+    # Which operating system to run on?
+    # ubuntu-latest = 最新版 Ubuntu Linux
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: 把程式碼下載到這台虛擬機
+      # Download the code to this virtual machine
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      # Step 2: 安裝 Python / Install Python
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      # Step 3: 安裝依賴套件 / Install dependencies
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # Step 4: 執行測試 / Run tests
+      # 測試 FastAPI 模組是否能正確 import
+      # Test if FastAPI modules can be imported correctly
+      - name: ✅ Run basic tests
+        run: |
+          python -c "from main import app; print('✅ FastAPI app import OK!')"
+          python -c "from oauth_google import verify_google_id_token; print('✅ OAuth module OK!')"
+          python -c "from auth_utils import create_access_token; print('✅ Auth module OK!')"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: 建立 Docker Image / Build Docker Image
+  # ---------------------------------------------------------------------------
+  build:
+    name: 🐳 Build Docker Image
+    runs-on: ubuntu-latest
+    
+    # 這個 job 要等 test job 成功後才執行
+    # This job waits for the test job to succeed
+    needs: test
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      # 測試 Dockerfile 是否能成功 build
+      # Test if Dockerfile can build successfully
+      - name: 🔨 Build Docker image
+        run: |
+          docker build -t my-fastapi-app .
+          echo "✅ Docker build successful!"
+      
+      # 測試 container 是否能正常啟動
+      # Test if container can start normally
+      - name: 🧪 Test Docker container
+        run: |
+          # 在背景啟動 container / Start container in background
+          docker run -d -p 8000:8000 --name test-container my-fastapi-app
+          
+          # 等待服務啟動 / Wait for service to start
+          sleep 5
+          
+          # 測試 API 是否回應 / Test if API responds
+          curl -f http://localhost:8000/ || exit 1
+          echo "✅ Container is running!"
+          
+          # 清理 / Cleanup
+          docker stop test-container
+
+  # ---------------------------------------------------------------------------
+  # Job 3: 部署到 Render / Deploy to Render
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: 🚀 Deploy to Render
+    runs-on: ubuntu-latest
+    
+    # 等 build job 成功後才執行
+    # Wait for build job to succeed
+    needs: build
+    
+    steps:
+      # 使用 Render Deploy Hook（最簡單！）
+      # Use Render Deploy Hook (easiest method!)
+      # 
+      # 🎯 TODO：設定完 Render 後，把 Deploy Hook URL 存到 GitHub Secrets
+      #    After setting up Render, save Deploy Hook URL to GitHub Secrets
+      #    
+      #    步驟 Steps：
+      #    1. 到 Render Dashboard → 你的服務 → Settings → Deploy Hook
+      #       Go to Render Dashboard → Your service → Settings → Deploy Hook
+      #    2. 複製 URL / Copy URL
+      #    3. 到 GitHub Repo → Settings → Secrets and variables → Actions
+      #    4. 新增 secret / Add new secret：RENDER_DEPLOY_HOOK_URL
+      - name: 🔔 Trigger Render Deploy
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+            echo "✅ Deploy triggered!"
+          else
+            echo "⚠️ RENDER_DEPLOY_HOOK_URL not set - skipping deploy"
+            echo "📝 請參考 docs/RENDER_SETUP.md 設定"
+            echo "📝 See docs/RENDER_SETUP.md for setup instructions"
+          fi
+
+# =============================================================================
+# 🎓 練習題 Exercises
+# =============================================================================
+#
+# 1. 觀察 GitHub Actions 頁面，看看每個 step 執行的過程
+#    Observe the GitHub Actions page, watch each step's execution
+#
+# 2. 故意把 main.py 改壞，push 看看會發生什麼
+#    Intentionally break main.py and push to see what happens
+#
+# 3. 新增一個 step / Add a new step：
+#    - name: Print Python version
+#      run: python --version
+#
+# =============================================================================
